@@ -1,93 +1,170 @@
 import streamlit as st
-import seaborn as sns
+import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import os
+
+from sklearn.datasets import load_diabetes
+from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error,mean_squared_error,r2_score
-st.set_page_config("Linear Regression",layout="centered")
-def load_css(file):
-    with open(file) as f:
-        st.markdown(f"<style>{f.read()}</style>",unsafe_allow_html=True)
-load_css("style.css")
-st.markdown("""  
-    <div class="card">
-            <h1>Linear Regression</h1>
-            <p>Predict <b> Tip Amount </b> from <b>Total Bill</b> using Linear Regression...</p>
-    </div>
-""",unsafe_allow_html=True)
-#Datset Preview
+from sklearn.metrics import r2_score, mean_squared_error
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RAW_DIR = os.path.join(BASE_DIR, "data", "raw")
+CLEAN_DIR = os.path.join(BASE_DIR, "data", "cleaned")
+
+os.makedirs(RAW_DIR, exist_ok=True)
+os.makedirs(CLEAN_DIR, exist_ok=True)
+
+st.set_page_config("End-to-End Linear Regression", layout="wide")
+st.title("End-to-End Linear Regression Platform")
+
+st.header("Step 1 : Data Ingestion")
+
 @st.cache_data
 def load_data():
-    return sns.load_dataset("tips")
-df=load_data()
-st.markdown("""
-    <div class="card">
-        <b>Datset Preview</b>
-    </div>
-"""
-'',unsafe_allow_html=True)
+    data = load_diabetes(as_frame=True)
+    df = data.frame
+    df['target'] = data.target
+
+    np.random.seed(42)
+
+    for col in df.columns[:-1]:
+        df.loc[df.sample(frac=0.1).index, col] = np.nan
+
+    return df
+
+df = load_data()
+
+raw_path = os.path.join(RAW_DIR, "diabetes_raw.csv")
+df.to_csv(raw_path, index=False)
+
+st.success("Dataset Loaded")
 st.dataframe(df.head())
-#Prepare the data
-x,y=df[["total_bill"]],df["tip"]
-x_train,x_test,y_train,y_test=train_test_split(x,y,test_size=0.3,random_state=42)
-sc=StandardScaler()
-x_train=sc.fit_transform(x_train)
-x_test=sc.transform(x_test)
-lr=LinearRegression()
-lr.fit(x_train,y_train)
-y_pred=lr.predict(x_test)
-#Metrics
-mae=mean_absolute_error(y_test,y_pred)
-rmse=np.sqrt(mean_squared_error(y_test,y_pred))
-r2=r2_score(y_test,y_pred)
-adj_r2=1-(1-r2)*(len(y_test)-1)/(len(y_test)-2)
-#Visualize the data
-st.markdown("""
-    <div class="card">
-        <b>Simple Linear Regression Plot (Total Bill vs Tips)</b>
-    </div>
-"""
-'',unsafe_allow_html=True)
-fig,ax=plt.subplots()
-ax.scatter(df['total_bill'],df['tip'],alpha=0.6)
-ax.plot(df["total_bill"],lr.predict(sc.transform(x)),color="red")
-ax.set_xlabel("Total Bill")
-ax.set_ylabel("Tips")
+
+# ================================
+# EDA
+# ================================
+
+st.header("Step 2 : Exploratory Data Analysis")
+
+st.write("Shape:", df.shape)
+
+st.write("Missing Values")
+st.write(df.isnull().sum())
+
+fig, ax = plt.subplots(figsize=(10,8))
+sns.heatmap(df.corr(numeric_only=True), annot=True, cmap="coolwarm", ax=ax)
 st.pyplot(fig)
-#Performance
-st.markdown("""
-    <div class="card">
-        <b>Model Performance</b>
-    </div>
-"""
-'',unsafe_allow_html=True)
-c1,c2=st.columns(2)
-c1.metric('MAE (Mean Absolute Error) : ',f"{mae:.2f}")
-c2.metric('RMSE (Root Mean Squared Error) : ',f"{rmse:.2f}")
-c3,c4=st.columns(2)
-c3.metric('R2 Score : ',f"{r2:.3f}")
-c4.metric('Adjusted R2 Score : ',f"{adj_r2:.3f}")
-#m and c
-st.markdown(f""" 
-    <div class="card">
-            <h3>Model Intercept & Coefficient</h3>
-            <p><b>Coefficient : </b>{lr.coef_[0]:.3f}<br>
-                <b>Intercept : </b>{lr.intercept_:.3f}
-            </p>
-    </div>
-""",unsafe_allow_html=True)
-#Prediction
-st.markdown(""" 
-    <div class="card">
-        Predicted Tip Amount
-    </div>
-""",unsafe_allow_html=True)
-bill=st.slider("Total Bill : ",float(df.total_bill.min()),float(df.total_bill.max()),30.0)
-tip=lr.predict(sc.transform([[bill]]))[0]
-st.markdown(f""" 
-    <div class="prediction-box">
-        Prediction Tip : ${tip:.2f}
-    </div>
-""",unsafe_allow_html=True)
+
+# ================================
+# DATA CLEANING
+# ================================
+
+st.header("Step 3 : Data Cleaning")
+
+strategy = st.selectbox(
+    "Missing Value Strategy",
+    ["Mean", "Median", "Drop Rows"]
+)
+
+df_clean = df.copy()
+
+if strategy == "Drop Rows":
+    df_clean = df_clean.dropna()
+
+elif strategy == "Mean":
+    numeric_cols = df_clean.select_dtypes(include=np.number).columns
+
+    df_clean[numeric_cols] = df_clean[numeric_cols].fillna(
+        df_clean[numeric_cols].mean()
+    )
+
+elif strategy == "Median":
+    numeric_cols = df_clean.select_dtypes(include=np.number).columns
+
+    df_clean[numeric_cols] = df_clean[numeric_cols].fillna(
+        df_clean[numeric_cols].median()
+    )
+
+st.subheader("Cleaned Dataset")
+st.dataframe(df_clean.head())
+
+st.subheader("Remaining Missing Values")
+st.write(df_clean.isnull().sum())
+
+if st.button("Save Cleaned Dataset"):
+    clean_path = os.path.join(CLEAN_DIR, "cleaned_diabetes.csv")
+    df_clean.to_csv(clean_path, index=False)
+
+    st.success("Dataset Saved")
+    st.info(f"Saved at: {clean_path}")
+
+# ================================
+# LOAD CLEANED DATA
+# ================================
+
+st.header("Step 4 : Load Cleaned Dataset")
+
+clean_files = [f for f in os.listdir(CLEAN_DIR) if "diabetes" in f.lower()]
+
+if not clean_files:
+    st.error("No cleaned dataset found")
+    st.stop()
+
+selected = st.selectbox("Select Dataset", clean_files)
+
+df_model = pd.read_csv(os.path.join(CLEAN_DIR, selected))
+
+st.dataframe(df_model.head())
+
+# ================================
+# TRAIN MODEL
+# ================================
+
+st.header("Step 5 : Train Linear Regression Model")
+
+target = "target"
+
+X = df_model.drop(columns=[target])
+y = df_model[target]
+
+scaler = StandardScaler()
+
+X_scaled = scaler.fit_transform(X)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled,
+    y,
+    test_size=0.25,
+    random_state=42
+)
+
+model = LinearRegression()
+
+model.fit(X_train, y_train)
+
+y_pred = model.predict(X_test)
+
+# ================================
+# EVALUATION
+# ================================
+
+r2 = r2_score(y_test, y_pred)
+mse = mean_squared_error(y_test, y_pred)
+
+st.success(f"R² Score: {r2:.2f}")
+st.success(f"MSE: {mse:.2f}")
+
+fig, ax = plt.subplots()
+
+ax.scatter(y_test, y_pred, alpha=0.6)
+
+ax.set_xlabel("Actual Target")
+ax.set_ylabel("Predicted Target")
+ax.set_title("Actual vs Predicted")
+
+st.pyplot(fig)
